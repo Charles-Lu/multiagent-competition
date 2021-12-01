@@ -22,6 +22,7 @@ class SumoEnv(MultiAgentEnv):
         self.arena_height = self.env_scene.model.geom_size[self.arena_id][1] * 2
         self._set_geom_radius()
         self.agent_contacts = False
+        self.positions = [None] * self.num_agents
 
     def _past_limit(self):
         if self._max_episode_steps <= self._elapsed_steps:
@@ -35,6 +36,15 @@ class SumoEnv(MultiAgentEnv):
         if r > self.RADIUS:
             return True
         return False
+
+    def get_agent_movement(self, agent_id):
+        xy = self.agents[agent_id].get_qpos()[:2]
+        xy_old = self.positions[agent_id]
+        if xy_old is None:
+            return 0
+        movement = np.sum((xy - xy_old) ** 2) ** 0.5
+        self.positions[agent_id] = xy
+        return movement
 
     def _is_fallen(self, agent_id, limit=0.5):
         if self.agents[agent_id].team == 'ant':
@@ -78,13 +88,19 @@ class SumoEnv(MultiAgentEnv):
         if len(agent_contacts) > 0:
             # print('Detected contacts:', agent_contacts)
             self.agent_contacts = True
+            for j in range(self.num_agents):
+                goal_rews[j] -= 250
+        
+        for j in range(self.num_agents):
+            movement = self.get_agent_movement(j)
+            goal_rews[j] -= movement * 500
 
         if any(fallen):
             done = True
             for j in range(self.num_agents):
                 if fallen[j]:
                     goal_rews[j] -= self.GOAL_REWARD
-                elif self.agent_contacts:
+                else:
                     goal_rews[j] += self.GOAL_REWARD
                     infos[j]['winner'] = True
             # import ipdb; ipdb.set_trace()
@@ -93,7 +109,7 @@ class SumoEnv(MultiAgentEnv):
             for j in range(self.num_agents):
                 if past_arena[j]:
                     goal_rews[j] -= self.GOAL_REWARD
-                elif self.agent_contacts:
+                else:
                     goal_rews[j] += self.GOAL_REWARD
                     infos[j]['winner'] = True
         elif timeup:
